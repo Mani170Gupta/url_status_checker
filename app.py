@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from openpyxl import load_workbook, Workbook
+from openpyxl.styles import Font, PatternFill
 import requests
 import os
 import io
@@ -51,11 +52,21 @@ def check_single_url(url):
         return {"url": url, "status": "Error", "error": str(e)}
 
 
-def build_excel_response(results):
-    """Builds an in-memory .xlsx file from a list of result dicts and returns it as a download."""
+def build_excel_response(results, note=None):
+    """Builds an in-memory .xlsx file from a list of result dicts and returns it as a download.
+    If `note` is provided, it's written as a highlighted banner row above the table."""
     wb = Workbook()
     ws = wb.active
     ws.title = "Status Results"
+
+    if note:
+        ws.append([note])
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=4)
+        note_cell = ws.cell(row=1, column=1)
+        note_cell.font = Font(bold=True, color="9C0000")
+        note_cell.fill = PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid")
+        ws.append([])  # blank spacer row
+
     ws.append(["URL", "Status Code", "Final URL", "Redirected"])
     for r in results:
         ws.append([
@@ -95,10 +106,17 @@ def check_status():
     if not isinstance(urls, list) or not urls:
         return jsonify({"error": "Please provide a non-empty list of URLs"}), 400
 
+    total_submitted = len(urls)
     urls = urls[:MAX_URLS_PER_REQUEST]
     results = [r for r in (check_single_url(u) for u in urls) if r]
 
-    return jsonify({"results": results, "count": len(results)})
+    truncated = total_submitted > MAX_URLS_PER_REQUEST
+    return jsonify({
+        "results": results,
+        "count": len(results),
+        "truncated": truncated,
+        "total_submitted": total_submitted,
+    })
 
 
 @app.route("/export-excel", methods=["POST"])
@@ -106,9 +124,18 @@ def export_excel():
     """Takes the JSON results already shown on-screen and returns them as a downloadable .xlsx."""
     data = request.get_json(silent=True) or {}
     results = data.get("results", [])
+    total_submitted = data.get("total_submitted")
     if not results:
         return jsonify({"error": "No results provided"}), 400
-    return build_excel_response(results)
+
+    note = None
+    if total_submitted and total_submitted > MAX_URLS_PER_REQUEST:
+        note = (
+            f"Note: {total_submitted} URLs were submitted. "
+            f"Only the first {MAX_URLS_PER_REQUEST} were checked due to processing limits."
+        )
+
+    return build_excel_response(results, note=note)
 
 
 @app.route("/check-excel", methods=["POST"])
@@ -140,10 +167,19 @@ def check_excel():
     if not urls:
         return jsonify({"error": "No URLs found in the first column of the sheet"}), 400
 
+    total_found = len(urls)
     urls = urls[:MAX_URLS_PER_REQUEST]
     results = [r for r in (check_single_url(u) for u in urls) if r]
 
-    return build_excel_response(results)
+    note = None
+    if total_found > MAX_URLS_PER_REQUEST:
+        note = (
+            f"Note: This file contained {total_found} URLs. "
+            f"Only the first {MAX_URLS_PER_REQUEST} were checked due to processing limits. "
+            f"Please split the remaining URLs into a separate file and re-upload."
+        )
+
+    return build_excel_response(results, note=note)
 
 
 if __name__ == "__main__":
