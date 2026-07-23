@@ -7,8 +7,7 @@ app = Flask(__name__)
 
 # Restrict this to your actual WordPress domain once live.
 # Example: CORS(app, origins=["https://youragencysite.com"])
-ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*")
-CORS(app, origins=ALLOWED_ORIGINS if ALLOWED_ORIGINS == "*" else ALLOWED_ORIGINS.split(","))
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=False)
 
 MAX_URLS_PER_REQUEST = 50
 REQUEST_TIMEOUT = 6  # seconds per URL
