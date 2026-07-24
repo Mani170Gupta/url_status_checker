@@ -5,6 +5,7 @@ from openpyxl.styles import Font, PatternFill
 import requests
 import os
 import io
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 app = Flask(__name__)
 
@@ -13,6 +14,21 @@ CORS(app, resources={r"/*": {"origins": "https://sylvrae.com"}}, supports_creden
 
 MAX_URLS_PER_REQUEST = 200
 REQUEST_TIMEOUT = 6  # seconds per URL
+BATCH_CONCURRENCY = 10  # how many URLs to check in parallel at once
+
+
+def check_urls_batch(urls, max_workers=BATCH_CONCURRENCY):
+    """Checks a list of URLs using a limited thread pool, so at most `max_workers`
+    requests are in flight at once — fast, but never hammers targets or the server."""
+    results = [None] * len(urls)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_index = {
+            executor.submit(check_single_url, url): i for i, url in enumerate(urls)
+        }
+        for future in as_completed(future_to_index):
+            index = future_to_index[future]
+            results[index] = future.result()
+    return [r for r in results if r]
 
 
 def check_single_url(url):
@@ -108,7 +124,7 @@ def check_status():
 
     total_submitted = len(urls)
     urls = urls[:MAX_URLS_PER_REQUEST]
-    results = [r for r in (check_single_url(u) for u in urls) if r]
+    results = check_urls_batch(urls)
 
     truncated = total_submitted > MAX_URLS_PER_REQUEST
     return jsonify({
@@ -169,7 +185,7 @@ def check_excel():
 
     total_found = len(urls)
     urls = urls[:MAX_URLS_PER_REQUEST]
-    results = [r for r in (check_single_url(u) for u in urls) if r]
+    results = check_urls_batch(urls)
 
     note = None
     if total_found > MAX_URLS_PER_REQUEST:
